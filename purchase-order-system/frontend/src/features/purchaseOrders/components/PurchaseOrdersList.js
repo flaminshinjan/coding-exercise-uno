@@ -12,6 +12,8 @@ const PurchaseOrdersList = ({
   swipeReset = null,
   removingOrderIds = [],
   onRemovalAnimationComplete = () => {},
+  onOrderSelect = () => {},
+  selectedOrderId = null,
 }) => {
   const containerRef = useRef(null);
   const sentinelRef = useRef(null);
@@ -57,6 +59,8 @@ const PurchaseOrdersList = ({
             }
             isRemoving={removingOrderIds.includes(order.id)}
             onRemovalAnimationComplete={onRemovalAnimationComplete}
+            onSelect={onOrderSelect}
+            isActive={selectedOrderId === order.id}
           />
         ))}
       </div>

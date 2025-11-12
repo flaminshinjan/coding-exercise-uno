@@ -11,6 +11,7 @@ import { getOrderStatus, ORDER_STATUS } from '../utils/orderStatus';
 import CreatePurchaseOrderForm from './CreatePurchaseOrderForm';
 import EmptyState from './EmptyState';
 import LoadingState from './LoadingState';
+import PurchaseOrderDetailsPanel from './PurchaseOrderDetailsPanel';
 import PurchaseOrdersList from './PurchaseOrdersList';
 import DeleteConfirmationDialog from './DeleteConfirmationDialog';
 import Toast from './Toast';
@@ -35,8 +36,11 @@ const PurchaseOrdersPage = () => {
   const [swipeReset, setSwipeReset] = useState(null);
   const [removingOrderIds, setRemovingOrderIds] = useState([]);
   const [toast, setToast] = useState(null);
+  const [selectedOrder, setSelectedOrder] = useState(null);
+  const [isDetailsOpen, setIsDetailsOpen] = useState(false);
   const scrollContainerRef = useRef(null);
   const headerSentinelRef = useRef(null);
+  const closeDetailsTimeoutRef = useRef(null);
 
   useEffect(() => {
     if (process.env.NODE_ENV !== 'production') {
@@ -218,14 +222,101 @@ const PurchaseOrdersPage = () => {
   const handleToggleForm = () => {
     setIsWorkspaceCollapsed(false);
     setShowForm((prev) => !prev);
+    setIsDetailsOpen(false);
   };
 
   const handleToggleWorkspace = () => {
     if (!isWorkspaceCollapsed && showForm) {
       setShowForm(false);
     }
+    setIsDetailsOpen(false);
     setIsWorkspaceCollapsed((prev) => !prev);
   };
+
+  const handleOrderSelect = useCallback(
+    (order) => {
+      if (!order) {
+        return;
+      }
+
+      setShowForm(false);
+      setIsWorkspaceCollapsed(false);
+      setSelectedOrder(order);
+      setIsDetailsOpen(true);
+    },
+    [],
+  );
+
+  const handleCloseDetails = useCallback(() => {
+    setIsDetailsOpen(false);
+  }, []);
+
+  useEffect(() => {
+    if (!isDetailsOpen) {
+      return undefined;
+    }
+
+    const originalOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+
+    return () => {
+      document.body.style.overflow = originalOverflow;
+    };
+  }, [isDetailsOpen]);
+
+  useEffect(() => {
+    if (!selectedOrder) {
+      return undefined;
+    }
+
+    const updatedOrder = orders.find((entry) => entry.id === selectedOrder.id);
+    if (updatedOrder && updatedOrder !== selectedOrder) {
+      setSelectedOrder(updatedOrder);
+    }
+  }, [orders, selectedOrder]);
+
+  useEffect(() => {
+    if (isDetailsOpen || !selectedOrder) {
+      if (closeDetailsTimeoutRef.current) {
+        window.clearTimeout(closeDetailsTimeoutRef.current);
+        closeDetailsTimeoutRef.current = null;
+      }
+      return undefined;
+    }
+
+    closeDetailsTimeoutRef.current = window.setTimeout(() => {
+      closeDetailsTimeoutRef.current = null;
+      setSelectedOrder(null);
+    }, 340);
+
+    return () => {
+      if (closeDetailsTimeoutRef.current) {
+        window.clearTimeout(closeDetailsTimeoutRef.current);
+        closeDetailsTimeoutRef.current = null;
+      }
+    };
+  }, [isDetailsOpen, selectedOrder]);
+
+  useEffect(() => {
+    if (!selectedOrder) {
+      return undefined;
+    }
+
+    const stillExists = orders.some((entry) => entry.id === selectedOrder.id);
+    if (!stillExists) {
+      setIsDetailsOpen(false);
+      setSelectedOrder(null);
+    }
+  }, [orders, selectedOrder]);
+
+  useEffect(
+    () => () => {
+      if (closeDetailsTimeoutRef.current) {
+        window.clearTimeout(closeDetailsTimeoutRef.current);
+      }
+    },
+    [],
+  );
 
   const headerCardClass = `relative overflow-hidden rounded-3xl border transition-all duration-300 ${
     isHeaderCondensed
@@ -401,6 +492,8 @@ const PurchaseOrdersPage = () => {
                       swipeReset={swipeReset}
                       removingOrderIds={removingOrderIds}
                       onRemovalAnimationComplete={handleRemoveAnimationComplete}
+                      onOrderSelect={handleOrderSelect}
+                      selectedOrderId={selectedOrder?.id ?? null}
                     />
                   )}
                 </div>
@@ -417,6 +510,11 @@ const PurchaseOrdersPage = () => {
         isLoading={isProcessingDelete}
       />
       <Toast toast={toast} onDismiss={() => setToast(null)} />
+      <PurchaseOrderDetailsPanel
+        order={selectedOrder}
+        isOpen={isDetailsOpen}
+        onClose={handleCloseDetails}
+      />
     </div>
   );
 };

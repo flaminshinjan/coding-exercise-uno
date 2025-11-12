@@ -1,15 +1,10 @@
-import React, {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { formatCurrency, formatDate } from '../utils/formatters';
 import { getOrderStatus, getOrderStatusMeta } from '../utils/orderStatus';
 
 const SWIPE_THRESHOLD = 0.5;
+const POINTER_ACTIVATION_DISTANCE = 8;
 
 const PurchaseOrderCard = ({
   order,
@@ -18,6 +13,8 @@ const PurchaseOrderCard = ({
   isConfirming,
   isRemoving,
   onRemovalAnimationComplete,
+  onSelect = () => {},
+  isActive = false,
 }) => {
   const status = useMemo(() => {
     const statusKey = getOrderStatus(order);
@@ -30,9 +27,9 @@ const PurchaseOrderCard = ({
     pointerId: null,
     startX: 0,
     startY: 0,
-    hasMoved: false,
+    hasExceededThreshold: false,
   });
-
+  const movedDuringInteractionRef = useRef(false);
   const removalTimeoutRef = useRef(null);
   const [dragX, setDragX] = useState(0);
   const [isDragging, setIsDragging] = useState(false);
@@ -54,6 +51,13 @@ const PurchaseOrderCard = ({
     setDragX(0);
     setIsActionActive(false);
     setIsAnimatingOut(false);
+    pointerRef.current = {
+      pointerId: null,
+      startX: 0,
+      startY: 0,
+      hasExceededThreshold: false,
+    };
+    movedDuringInteractionRef.current = false;
   }, [resetSignal]);
 
   useEffect(() => {
@@ -100,13 +104,15 @@ const PurchaseOrderCard = ({
 
   const releasePointer = useCallback(
     (shouldTrigger) => {
+      const didMove = pointerRef.current.hasExceededThreshold;
       setIsDragging(false);
       pointerRef.current = {
         pointerId: null,
         startX: 0,
         startY: 0,
-        hasMoved: false,
+        hasExceededThreshold: false,
       };
+      movedDuringInteractionRef.current = didMove;
 
       if (shouldTrigger) {
         triggerDelete();
@@ -139,30 +145,33 @@ const PurchaseOrderCard = ({
       const width = container.offsetWidth || 1;
       const threshold = width * SWIPE_THRESHOLD;
       const distance = Math.abs(dragX);
-
       const shouldTrigger = dragX < 0 && distance >= threshold;
       releasePointer(shouldTrigger);
     },
     [dragX, isDragging, releasePointer],
   );
 
-  const handlePointerDown = useCallback((event) => {
-    if (isAnimatingOut || isRemoving || isConfirming) {
-      return;
-    }
+  const handlePointerDown = useCallback(
+    (event) => {
+      if (isAnimatingOut || isRemoving || isConfirming) {
+        return;
+      }
 
-    pointerRef.current = {
-      pointerId: event.pointerId,
-      startX: event.clientX,
-      startY: event.clientY,
-      hasMoved: false,
-    };
+      movedDuringInteractionRef.current = false;
+      pointerRef.current = {
+        pointerId: event.pointerId,
+        startX: event.clientX,
+        startY: event.clientY,
+        hasExceededThreshold: false,
+      };
 
-    setIsDragging(true);
-    setIsActionActive(false);
+      setIsDragging(true);
+      setIsActionActive(false);
 
-    frameRef.current?.setPointerCapture(event.pointerId);
-  }, [isAnimatingOut, isConfirming, isRemoving]);
+      frameRef.current?.setPointerCapture(event.pointerId);
+    },
+    [isAnimatingOut, isConfirming, isRemoving],
+  );
 
   const handlePointerMove = useCallback(
     (event) => {
@@ -177,12 +186,21 @@ const PurchaseOrderCard = ({
       const deltaX = event.clientX - pointerRef.current.startX;
       const deltaY = event.clientY - pointerRef.current.startY;
 
-      if (!pointerRef.current.hasMoved) {
-        if (Math.abs(deltaY) > Math.abs(deltaX)) {
+      if (!pointerRef.current.hasExceededThreshold) {
+        const absDeltaX = Math.abs(deltaX);
+        const absDeltaY = Math.abs(deltaY);
+
+        if (absDeltaY > absDeltaX) {
           releasePointer(false);
           return;
         }
-        pointerRef.current.hasMoved = true;
+
+        if (absDeltaX < POINTER_ACTIVATION_DISTANCE) {
+          return;
+        }
+
+        pointerRef.current.hasExceededThreshold = true;
+        movedDuringInteractionRef.current = true;
       }
 
       setDragX(clampDragX(deltaX));
@@ -204,8 +222,45 @@ const PurchaseOrderCard = ({
     [endDrag],
   );
 
+  const handleSelect = useCallback(() => {
+    if (
+      isAnimatingOut ||
+      isRemoving ||
+      isConfirming ||
+      movedDuringInteractionRef.current
+    ) {
+      movedDuringInteractionRef.current = false;
+      return;
+    }
+
+    movedDuringInteractionRef.current = false;
+    onSelect(order);
+  }, [isAnimatingOut, isConfirming, isRemoving, onSelect, order]);
+
+  const handleKeyDown = useCallback(
+    (event) => {
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        handleSelect();
+      }
+    },
+    [handleSelect],
+  );
+
   const iconClass =
     'h-6 w-6 stroke-[1.5] text-red-100 transition-transform duration-300';
+
+  const handleDetailsButtonClick = useCallback(
+    (event) => {
+      event.stopPropagation();
+      if (isRemoving || isConfirming || isAnimatingOut) {
+        return;
+      }
+      movedDuringInteractionRef.current = false;
+      onSelect(order);
+    },
+    [isAnimatingOut, isConfirming, isRemoving, onSelect, order],
+  );
 
   return (
     <div
@@ -253,14 +308,20 @@ const PurchaseOrderCard = ({
       <article
         ref={cardRef}
         className={`group relative flex h-full flex-col rounded-2xl border border-neutral-200 bg-white/90 p-5 shadow-sm transition-[box-shadow,transform,opacity] duration-300 dark:border-neutral-800 dark:bg-neutral-900/80 ${
-          isAnimatingOut || isRemoving ? 'pointer-events-none opacity-0' : 'opacity-100'
-        }`}
+          isAnimatingOut || isRemoving
+            ? 'pointer-events-none opacity-0'
+            : 'opacity-100'
+        } ${isActive ? 'ring-2 ring-neutral-900/10 dark:ring-neutral-100/20' : ''}`}
         style={{
           transform: `translateX(${dragX}px)`,
           transition: isDragging
             ? 'none'
             : 'transform 340ms cubic-bezier(0.22, 1, 0.36, 1)',
         }}
+        onClick={handleSelect}
+        onKeyDown={handleKeyDown}
+        role="button"
+        tabIndex={0}
       >
         <header className="flex items-start justify-between gap-4">
           <div className="space-y-1">
@@ -271,11 +332,21 @@ const PurchaseOrderCard = ({
               {order.item_name}
             </h3>
           </div>
-          <span
-            className={`shrink-0 rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-wide transition-colors duration-200 ${status.badgeClass}`}
-          >
-            {status.label}
-          </span>
+          <div className="flex items-center gap-2">
+            <span
+              className={`shrink-0 rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-wide transition-colors duration-200 ${status.badgeClass}`}
+            >
+              {status.label}
+            </span>
+            <button
+              type="button"
+              onClick={handleDetailsButtonClick}
+              onPointerDown={(event) => event.stopPropagation()}
+              className="inline-flex items-center gap-2 rounded-full border border-neutral-200 px-4 py-1.5 text-xs font-semibold uppercase tracking-wide text-neutral-600 transition-colors duration-200 hover:border-neutral-400 hover:text-neutral-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-400 focus-visible:ring-offset-2 focus-visible:ring-offset-white dark:border-neutral-700 dark:text-neutral-300 dark:hover:border-neutral-500 dark:hover:text-neutral-100 dark:focus-visible:ring-neutral-600 dark:focus-visible:ring-offset-neutral-900"
+            >
+              View Details
+            </button>
+          </div>
         </header>
 
         <section className="mt-4 flex flex-col gap-4">
@@ -321,12 +392,9 @@ const PurchaseOrderCard = ({
         </section>
 
         <footer className="mt-auto flex items-center justify-between pt-5">
-          <span className="text-xs font-medium uppercase tracking-wide text-neutral-400 transition-colors duration-300 dark:text-neutral-500">
-            Swipe Left to Delete
+          <span className="justify-between text-[11px] font-semibold uppercase tracking-wide text-neutral-400 transition-colors duration-300 dark:text-neutral-600">
+            Swipe left to delete
           </span>
-          <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wide text-neutral-400 transition-colors duration-300 dark:text-neutral-600">
-            Hold & Drag
-          </div>
         </footer>
       </article>
     </div>
