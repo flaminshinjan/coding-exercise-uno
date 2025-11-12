@@ -33,6 +33,7 @@ const PurchaseOrderCard = ({
     hasMoved: false,
   });
 
+  const removalTimeoutRef = useRef(null);
   const [dragX, setDragX] = useState(0);
   const [isDragging, setIsDragging] = useState(false);
   const [isActionActive, setIsActionActive] = useState(false);
@@ -64,19 +65,31 @@ const PurchaseOrderCard = ({
 
   useEffect(() => {
     if (!isRemoving || isAnimatingOut) {
-      return undefined;
+      return;
     }
 
     const width = cardRef.current?.offsetWidth || 320;
     setIsAnimatingOut(true);
     setDragX((-width || -320) - 64);
 
-    const timeout = window.setTimeout(() => {
-      onRemovalAnimationComplete(order.id);
-    }, 280);
+    if (removalTimeoutRef.current) {
+      window.clearTimeout(removalTimeoutRef.current);
+    }
 
-    return () => window.clearTimeout(timeout);
+    removalTimeoutRef.current = window.setTimeout(() => {
+      removalTimeoutRef.current = null;
+      onRemovalAnimationComplete(order.id);
+    }, 320);
   }, [isAnimatingOut, isRemoving, onRemovalAnimationComplete, order.id]);
+
+  useEffect(
+    () => () => {
+      if (removalTimeoutRef.current) {
+        window.clearTimeout(removalTimeoutRef.current);
+      }
+    },
+    [],
+  );
 
   const triggerDelete = useCallback(() => {
     const width = cardRef.current?.offsetWidth || 320;
@@ -240,7 +253,7 @@ const PurchaseOrderCard = ({
       <article
         ref={cardRef}
         className={`group relative flex h-full flex-col rounded-2xl border border-neutral-200 bg-white/90 p-5 shadow-sm transition-[box-shadow,transform,opacity] duration-300 dark:border-neutral-800 dark:bg-neutral-900/80 ${
-          isAnimatingOut ? 'pointer-events-none opacity-0' : 'opacity-100'
+          isAnimatingOut || isRemoving ? 'pointer-events-none opacity-0' : 'opacity-100'
         }`}
         style={{
           transform: `translateX(${dragX}px)`,
